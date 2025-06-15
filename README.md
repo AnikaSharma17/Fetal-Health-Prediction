@@ -1,8 +1,6 @@
 # Fetal-Health-Prediction
 This project uses machine learning to classify fetal health as Normal, Suspect, or Pathological based on cardiotocogram (CTG) data. It helps improve early diagnosis of fetal risks using models like Random Forest and SVM for accurate, data-driven predictions.
 
-# 🤰 Fetal Health Classification
-
 This project uses machine learning to classify fetal health status based on cardiotocogram (CTG) features. It provides an efficient way to assist healthcare professionals in identifying potential risks to a fetus during pregnancy.
 
 ## 📊 Dataset
