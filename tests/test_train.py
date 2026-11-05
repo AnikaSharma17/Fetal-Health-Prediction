@@ -1,11 +1,13 @@
 import pandas as pd
 import pytest
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
 from sklearn.tree import DecisionTreeClassifier
 
 from fetal_health.data import FEATURES
 from fetal_health.evaluate import summary_metrics
-from fetal_health.train import holdout_split, make_pipeline, model_grid, search_models
+from fetal_health.train import (holdout_split, make_pipeline, model_grid, search_models,
+                                strategy_table)
 
 
 @pytest.fixture(scope="module")
@@ -44,13 +46,31 @@ def test_preprocessing_is_fit_on_training_data_only(split):
     assert len(pipe.predict(X_test)) == len(X_test)  # SMOTE never touches prediction
 
 
-def test_search_is_reproducible(split):
+@pytest.mark.parametrize("strategy, has_smote, class_weight", [
+    ("smote", True, None), ("class_weight", False, "balanced"), ("none", False, None)])
+def test_imbalance_strategies(strategy, has_smote, class_weight):
+    model = LogisticRegression()
+    pipe = make_pipeline(model, strategy)
+    assert ("smote" in pipe.named_steps) == has_smote
+    assert pipe.named_steps["clf"].class_weight == class_weight
+    assert model.class_weight is None, "the caller's model must not be modified"
+
+
+def test_unknown_strategy_is_rejected():
+    with pytest.raises(ValueError, match="unknown strategy"):
+        make_pipeline(LogisticRegression(), "undersample")
+
+
+def test_search_covers_each_strategy_and_is_reproducible(split):
     X_train, _, y_train, _, g_train, _ = split
     grid = {"Decision Tree": {"model": DecisionTreeClassifier(random_state=0),
                               "params": {"max_depth": [3, 5]}}}
-    first, _ = search_models(X_train, y_train, g_train, grid=grid, n_jobs=1)
+    first, best = search_models(X_train, y_train, g_train, grid=grid, n_jobs=1)
     second, _ = search_models(X_train, y_train, g_train, grid=grid, n_jobs=1)
     pd.testing.assert_frame_equal(first, second)
+    assert sorted(first["strategy"]) == ["class_weight", "none", "smote"]
+    assert list(best) == ["Decision Tree"]
+    assert strategy_table(first).loc["Decision Tree"].max() == first["cv_f1_macro"].max()
 
 
 def test_model_beats_majority_baseline(split):
@@ -58,7 +78,7 @@ def test_model_beats_majority_baseline(split):
     grid = {
         "Majority baseline": model_grid()["Majority baseline"],
         "Random Forest": {"model": RandomForestClassifier(n_estimators=100, max_depth=6, random_state=0),
-                          "params": {}},
+                          "params": {}, "strategies": ["smote"]},
     }
     _, best = search_models(X_train, y_train, g_train, grid=grid, n_jobs=1)
     baseline = summary_metrics(y_test, best["Majority baseline"].predict(X_test))

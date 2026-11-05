@@ -4,6 +4,7 @@ from pathlib import Path
 import pandas as pd
 
 TARGET = "fetal_health"
+RECORDING = "recording"
 CLASS_NAMES = {1: "Normal", 2: "Suspect", 3: "Pathological"}
 
 # Physically plausible bounds per feature (inclusive). They are deliberately wide:
@@ -69,14 +70,25 @@ def validate(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def load_data(path: str | Path) -> pd.DataFrame:
-    """Read the CSV and validate it."""
-    return validate(pd.read_csv(path))
+def load_data(path: str | Path, recordings_path: str | Path | None = None) -> pd.DataFrame:
+    """Read the CSV and validate it.
+
+    If recordings_path is given (recording_ids.csv, built from the UCI release by
+    scripts/build_recording_ids.py), a RECORDING column with the source CTG recording
+    of each row is added. The two files must be in the same row order.
+    """
+    df = validate(pd.read_csv(path))
+    if recordings_path is not None:
+        ids = pd.read_csv(recordings_path)
+        if len(ids) != len(df) or ids["recording"].isna().any():
+            raise ValueError("recording IDs do not match the data file row for row")
+        df[RECORDING] = ids["recording"]
+    return df
 
 
 def drop_duplicates(df: pd.DataFrame) -> pd.DataFrame:
-    """Drop exact duplicate rows, keeping the first occurrence and the original row order."""
-    return df.drop_duplicates().reset_index(drop=True)
+    """Drop rows whose features and label repeat an earlier row, keeping the original order."""
+    return df.drop_duplicates(subset=FEATURES + [TARGET]).reset_index(drop=True)
 
 
 def label_conflicts(df: pd.DataFrame) -> pd.DataFrame:
@@ -86,13 +98,21 @@ def label_conflicts(df: pd.DataFrame) -> pd.DataFrame:
     return dup[n_labels > 1]
 
 
+def recording_groups(df: pd.DataFrame) -> pd.Series:
+    """The true source recording of each row (requires load_data(..., recordings_path))."""
+    if RECORDING not in df.columns:
+        raise ValueError("no recording column; pass recordings_path to load_data")
+    return df[RECORDING].rename("group")
+
+
 def pseudo_recording_groups(df: pd.DataFrame) -> pd.Series:
     """Approximate recording IDs as runs of consecutive rows with the same baseline value.
 
     The CSV has no recording identifier, but adjacent rows look like segments of the
     same CTG (they share the baseline far more often than random pairs). Keeping each
     run on one side of a split guards against that leakage. This is a heuristic proxy,
-    not ground truth, and relies on the file's original row order.
+    not ground truth, and relies on the file's original row order. Kept for comparison
+    with recording_groups(); the real IDs should be used for evaluation.
     """
     baseline = df["baseline value"]
     return (baseline != baseline.shift()).cumsum().rename("group")
