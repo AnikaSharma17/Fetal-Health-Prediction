@@ -9,14 +9,38 @@ is designed to avoid the leakage that commonly inflates results on this dataset.
 
 ## Results
 
-Test set: 423 records (330 Normal, 58 Suspect, 35 Pathological) from 72 recordings, 9 of which contain
-Pathological segments. The selected model is **gradient boosting with class weights**. It is reported at
-two operating points:
+The selected model is **gradient boosting with class weights**. It is reported at two operating points:
 
 - **Most likely class**: the model's own prediction.
 - **Pathological threshold**: calibrated probabilities, and Pathological is flagged whenever its
-  probability is at least 0.195. The threshold was chosen on the training set to reach 95% Pathological
+  probability passes a threshold. The threshold is chosen on the training set to reach 95% Pathological
   recall.
+
+### Across 10 train/test splits
+
+The whole procedure (model search, threshold, test evaluation) was repeated on 10 recording-grouped
+splits by `scripts/repeated_splits.py`. Gradient boosting was selected on all 10, with class weights on 9
+and SMOTE on 1. Mean, with the lowest and highest split in brackets:
+
+| Metric | Most likely class | Pathological threshold |
+|---|---|---|
+| Macro-F1 | **0.831** (0.779–0.889) | 0.788 (0.743–0.857) |
+| Balanced accuracy | 0.831 (0.793–0.891) | 0.826 (0.795–0.873) |
+| Accuracy | 0.902 (0.868–0.943) | 0.880 (0.839–0.922) |
+| Pathological recall | 0.783 (0.686–0.914) | **0.937** (0.857–1.000) |
+| Pathological precision | 0.790 (0.686–0.963) | 0.577 (0.422–0.680) |
+| Suspect recall | 0.773 (0.661–0.864) | 0.621 (0.475–0.690) |
+| Suspect precision | 0.784 (0.610–0.922) | 0.883 (0.725–1.000) |
+
+**The notebook's split (seed 42) is the most favourable of the ten:** it has the highest macro-F1 under
+both rules. A fair expectation on new recordings is about 0.83 macro-F1, not 0.89. The threshold reached
+its 95% recall target on 5 of the 10 test sets and stayed at or above 0.857 on all of them. The test sets of
+different splits overlap, so this spread is a rough guide rather than 10 independent trials.
+
+### On the notebook's split
+
+Test set: 423 records (330 Normal, 58 Suspect, 35 Pathological) from 72 recordings, 9 of which contain
+Pathological segments. The Pathological threshold here is 0.195.
 
 | Metric (95% CI) | Most likely class | Pathological threshold | Majority-class baseline |
 |---|---|---|---|
@@ -40,9 +64,10 @@ What the numbers say:
   hence intervals like 0.42–1.00 for recall at the default operating point.
 - **Accuracy is misleading here.** Predicting "Normal" for everything already gets 0.78, so models are
   selected and reported on macro-F1, which weighs the three classes equally.
-- **The earlier Suspect weak spot is gone.** Suspect precision was 0.57 with the previous model (Random
-  Forest + SMOTE, evaluated on a slightly different split) and is 0.92 now. The comparison below shows
-  SMOTE was not the best choice for most models.
+- **Suspect is much better than before, but varies by split.** Suspect precision was 0.57 with the
+  previous model (Random Forest + SMOTE, evaluated on a slightly different split). It is 0.92 on this
+  split and 0.78 on average across the 10 splits (0.61–0.92). The comparison below shows SMOTE was not
+  the best choice for most models.
 
 ### Model and imbalance strategy comparison
 
@@ -153,6 +178,8 @@ Sources:
 7. Calibrate probabilities, choose a Pathological threshold on out-of-fold training predictions, and
    evaluate that decision rule on the test set.
 8. Explain predictions with SHAP, and compare stratified, recording-grouped and proxy-grouped CV.
+9. Repeat steps 4–7 on 10 different splits (`scripts/repeated_splits.py`) to see how much the results
+   depend on the split.
 
 ## Project structure
 
@@ -160,14 +187,18 @@ Sources:
 fetal_health_prediction.ipynb   # the full analysis, top to bottom
 fetal_health.csv                # dataset (Kaggle)
 recording_ids.csv               # source recording of each row (UCI release)
+results/
+    repeated_splits.csv         # one row per train/test split from scripts/repeated_splits.py
 scripts/
     build_recording_ids.py      # rebuilds recording_ids.csv from the UCI CTG.xls
+    repeated_splits.py          # reruns selection and evaluation on 10 splits
 src/fetal_health/
     data.py                     # loading, validation, deduplication, recording groups
     train.py                    # leak-free pipelines, imbalance strategies, holdout split, model search
     evaluate.py                 # per-class metrics, bootstrap intervals, CV protocol comparison
     decision.py                 # probability calibration and the Pathological threshold
     explain.py                  # SHAP explanations
+    experiment.py               # the full procedure on one split, and the summary across splits
 tests/                          # pytest suite (data, leakage, reproducibility, decisions, baseline gate)
 ```
 
@@ -191,8 +222,12 @@ jupyter notebook fetal_health_prediction.ipynb   # or open it in VS Code
 
 `requirements.txt` installs the pinned runtime dependencies and the `fetal_health` package in editable
 mode; `requirements-dev.txt` adds pytest. Jupyter itself is not pinned; install it with `pip install notebook`
-if you don't already have it. A full run of the notebook took about 5.5 minutes on a 32-core desktop;
-most of it is the model search.
+if you don't already have it. A full run of the notebook took 2–6 minutes on a 32-core desktop; most of
+it is the model search.
+
+The notebook only reads `results/repeated_splits.csv`. To recompute it, run
+`python scripts/repeated_splits.py` (about 30 minutes for the 10 splits). It saves each split as it
+finishes and skips splits already in the file, so delete the file first for a fresh run.
 
 `recording_ids.csv` is already in the repository. To rebuild it, download `CTG.xls` from the
 [UCI repository](https://archive.ics.uci.edu/dataset/193/cardiotocography), then run
@@ -200,22 +235,24 @@ most of it is the model search.
 
 ## Limitations
 
-- **One dataset, one test split.** There is no external validation, and the test set has only 9
-  recordings with Pathological segments. The bootstrap intervals make this uncertainty visible, but they
-  cannot shrink it.
+- **One dataset.** There is no external validation. Each test set has only 8–10 recordings with
+  Pathological segments, and macro-F1 moves by a standard deviation of 0.04 between splits. The bootstrap
+  intervals and the repeated splits make this uncertainty visible, but they cannot shrink it.
 - **Labels are expert judgements.** "Suspect" in particular is a borderline category on which clinicians
   often disagree, and 88 recordings have segments with different labels.
 - **Calibration did not help on the test set.** The calibrated probabilities were worse there than the
   raw ones, so neither should be read as an exact risk.
-- **The threshold is set for one goal.** It targets 95% Pathological recall on training data; any other
-  balance between missed cases and false alarms needs a different threshold.
+- **The threshold is set for one goal, and only partly reaches it.** It targets 95% Pathological recall
+  on training data, which the test set matched on 5 of 10 splits. Any other balance between missed cases
+  and false alarms needs a different threshold.
+- **The repeated splits fix the calibration method.** They use sigmoid calibration on every split
+  instead of choosing it per split as the notebook does (the notebook's split chose sigmoid too).
 - **SHAP shows associations, not causes.** The SHAP values explain the uncalibrated model in log-odds,
   not the calibrated probabilities.
 
 ## Next steps
 
-- Repeat the train/test split over several seeds (or use nested CV) to reduce the dependence on a single
-  split.
 - Validate on an independent CTG dataset with the same features.
+- Find out why Suspect precision varies so much between splits (0.61–0.92).
 - Choose the threshold from explicit costs of missed Pathological cases and false alarms, possibly with
   a second threshold for Suspect.
