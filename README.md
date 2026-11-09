@@ -318,7 +318,3 @@ already in `repeated_splits.csv`, so delete both files first for a fresh run.
   36% of all false calls), so it will depend on which such recordings a new data set happens to contain.
 - **SHAP shows associations, not causes.** The SHAP values explain the uncalibrated model in log-odds,
   not the calibrated probabilities.
-
-## Next steps
-
-- Validate on an independent CTG dataset with the same features.
