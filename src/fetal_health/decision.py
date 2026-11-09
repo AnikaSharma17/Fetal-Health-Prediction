@@ -164,6 +164,11 @@ def cost_thresholds(y, proba, costs=DEFAULT_COSTS, grid=None):
     Fit on out-of-fold training predictions, never on the test set. Among equally good
     pairs, the highest thresholds (fewest alarms) win.
 
+    Both thresholds are searched jointly over the grid. For a fixed Suspect threshold, a
+    higher Pathological miss cost never raises the Pathological threshold; with the joint
+    search this usually holds too but is not guaranteed, because catching a Pathological
+    case as Suspect also gets cheaper relative to missing it.
+
     Returns (path_threshold, suspect_threshold).
     """
     grid = np.round(np.arange(0.99, 0.0, -0.01), 2) if grid is None else np.sort(grid)[::-1]
