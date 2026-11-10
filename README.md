@@ -297,24 +297,3 @@ already in `repeated_splits.csv`, so delete both files first for a fresh run.
 `recording_ids.csv` is already in the repository. To rebuild it, download `CTG.xls` from the
 [UCI repository](https://archive.ics.uci.edu/dataset/193/cardiotocography), then run
 `pip install xlrd` and `python scripts/build_recording_ids.py path/to/CTG.xls`.
-
-## Limitations
-
-- **One dataset.** There is no external validation. Each test set has only 8–10 recordings with
-  Pathological segments, and macro-F1 moves by a standard deviation of 0.04 between splits. The bootstrap
-  intervals and the repeated splits make this uncertainty visible, but they cannot shrink it.
-- **Labels are expert judgements.** "Suspect" in particular is a borderline category on which clinicians
-  often disagree, and 88 recordings have segments with different labels.
-- **The chosen calibration can still hurt on new data.** "No calibration" now competes with sigmoid and
-  isotonic, but on the notebook's split the training data still pick sigmoid, and it made the test log
-  loss worse (0.147 → 0.200). Neither set of probabilities should be read as an exact risk.
-- **The costs are illustrative.** The cost rule replaces a single 95%-recall target (met on 6 of 10 test
-  sets) with an explicit trade-off between missed cases and false alarms, but the costs are an assumption.
-  On the notebook's split, moving the Pathological miss cost from 2 to 50 moves the Pathological threshold
-  from 0.33 to 0.03 and the Pathological flags from 34 to 83. Real costs must come from clinicians.
-- **Suspect precision depends on a few recordings.** Calibration and both thresholds are now chosen per
-  split, exactly as in the notebook, so the repeated splits run the full procedure. Their spread in
-  Suspect precision is driven by a handful of recordings with many false Suspect calls (one of them gives
-  36% of all false calls), so it will depend on which such recordings a new data set happens to contain.
-- **SHAP shows associations, not causes.** The SHAP values explain the uncalibrated model in log-odds,
-  not the calibrated probabilities.
